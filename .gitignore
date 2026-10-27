@@ -1,0 +1,12 @@
+# Built programs go on the GitHub Releases page, not in the code history
+*.exe
+Versions/
+dist/
+publish/
+
+# Build leftovers
+bin/
+obj/
+.vs/
+*.user
+__pycache__/

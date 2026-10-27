@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stock Ticker</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page:        #f9f9f7;
+    --surface:     #fcfcfb;
+    --ink:         #0b0b0b;
+    --ink-2:       #52514e;
+    --muted:       #898781;
+    --grid:        #e1e0d9;
+    --baseline:    #c3c2b7;
+    --border:      rgba(11,11,11,0.10);
+    --series:      #2a78d6;
+    --series-soft: rgba(42,120,214,0.10);
+    --up:          #006300;
+    --down:        #d03b3b;
+    --hover:       rgba(11,11,11,0.045);
+    --overlay:     rgba(11,11,11,0.45);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --page:        #0d0d0d;
+      --surface:     #1a1a19;
+      --ink:         #ffffff;
+      --ink-2:       #c3c2b7;
+      --muted:       #898781;
+      --grid:        #2c2c2a;
+      --baseline:    #383835;
+      --border:      rgba(255,255,255,0.10);
+      --series:      #3987e5;
+      --series-soft: rgba(57,135,229,0.14);
+      --up:          #0ca30c;
+      --down:        #e66767;
+      --hover:       rgba(255,255,255,0.06);
+      --overlay:     rgba(0,0,0,0.6);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--page); color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 14px; line-height: 1.45;
+  }
+  button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+
+  .app { display: flex; flex-direction: column; height: 100vh; }
+
+  /* ---------- header ---------- */
+  header {
+    display: flex; align-items: center; gap: 16px; padding: 10px 18px;
+    border-bottom: 1px solid var(--border); background: var(--surface); z-index: 5;
+  }
+  header h1 { font-size: 15px; font-weight: 650; margin: 0; letter-spacing: .2px; white-space: nowrap; }
+  .search { position: relative; width: min(440px, 50vw); }
+  .search input {
+    width: 100%; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--page); color: var(--ink); font: inherit; outline: none;
+  }
+  .search input:focus { border-color: var(--series); }
+  .suggest {
+    position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 30;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    box-shadow: 0 8px 28px rgba(0,0,0,.18); overflow: hidden; display: none;
+  }
+  .suggest.open { display: block; }
+  .suggest button {
+    display: flex; gap: 10px; align-items: baseline; width: 100%;
+    padding: 9px 12px; text-align: left;
+  }
+  .suggest button:hover, .suggest button.active { background: var(--hover); }
+  .suggest .sym { font-weight: 650; min-width: 64px; }
+  .suggest .nm  { color: var(--ink-2); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .suggest .ex  { color: var(--muted); font-size: 12px; }
+  .live { margin-left: auto; display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .live .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--up); }
+  .live.stale .dot { background: var(--muted); }
+
+  /* ---------- layout ---------- */
+  main { flex: 1; display: grid; grid-template-columns: 1fr 380px; min-height: 0; }
+  .quote-pane { padding: 20px 24px; overflow-y: auto; }
+  .news-pane {
+    border-left: 1px solid var(--border); background: var(--surface);
+    display: flex; flex-direction: column; min-height: 0;
+  }
+
+  /* ---------- quote ---------- */
+  .qhead .name { font-size: 15px; color: var(--ink-2); }
+  .qhead .name b { color: var(--ink); font-size: 17px; font-weight: 650; margin-right: 8px; }
+  .qhead .exch { color: var(--muted); font-size: 12px; margin-top: 1px; }
+  .price-row { display: flex; align-items: baseline; gap: 14px; margin: 10px 0 2px; flex-wrap: wrap; }
+  .price { font-size: 44px; font-weight: 650; letter-spacing: -.5px; }
+  .delta { font-size: 17px; font-weight: 600; }
+  .delta.up { color: var(--up); } .delta.down { color: var(--down); }
+  .asof { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
+
+  .ranges { display: flex; gap: 4px; margin: 6px 0 4px; }
+  .ranges button { padding: 5px 12px; border-radius: 7px; color: var(--ink-2); font-size: 13px; }
+  .ranges button:hover { background: var(--hover); }
+  .ranges button.on { background: var(--series-soft); color: var(--series); font-weight: 650; }
+
+  .chart-wrap { position: relative; margin: 4px 0 18px; }
+  .chart-wrap svg { display: block; width: 100%; height: 260px; }
+  .tooltip {
+    position: absolute; pointer-events: none; display: none; z-index: 4;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 6px 10px; font-size: 12px; box-shadow: 0 4px 16px rgba(0,0,0,.15); white-space: nowrap;
+  }
+  .tooltip .tv { font-weight: 650; font-variant-numeric: tabular-nums; }
+  .tooltip .tt { color: var(--muted); }
+
+  .stats {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 1px; background: var(--border); border: 1px solid var(--border);
+    border-radius: 12px; overflow: hidden;
+  }
+  .stat { background: var(--surface); padding: 10px 14px; }
+  .stat .k { color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .4px; }
+  .stat .v { font-size: 15px; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; }
+
+  .pane-msg { color: var(--muted); padding: 40px 20px; text-align: center; }
+  .pane-msg.err { color: var(--down); }
+
+  /* ---------- news ---------- */
+  .news-pane h2 {
+    font-size: 12px; font-weight: 650; text-transform: uppercase; letter-spacing: .6px;
+    color: var(--muted); margin: 0; padding: 14px 16px 10px;
+  }
+  .news-list { overflow-y: auto; flex: 1; padding: 0 8px 12px; }
+  .news-item {
+    display: flex; gap: 12px; width: 100%; padding: 10px 8px; text-align: left;
+    border-radius: 10px; align-items: flex-start;
+  }
+  .news-item:hover { background: var(--hover); }
+  .news-item img {
+    width: 64px; height: 64px; object-fit: cover; border-radius: 8px;
+    background: var(--hover); flex-shrink: 0;
+  }
+  .news-item .noimg {
+    width: 64px; height: 64px; border-radius: 8px; background: var(--series-soft);
+    color: var(--series); display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 20px; flex-shrink: 0;
+  }
+  .news-item .ntitle {
+    font-weight: 570; display: -webkit-box; -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical; overflow: hidden; line-height: 1.35;
+  }
+  .news-item .nmeta { color: var(--muted); font-size: 12px; margin-top: 4px; }
+
+  /* ---------- modals ---------- */
+  .overlay {
+    position: fixed; inset: 0; background: var(--overlay); z-index: 50;
+    display: none; align-items: center; justify-content: center; padding: 24px;
+  }
+  .overlay.open { display: flex; }
+  .reader {
+    background: var(--surface); border-radius: 14px; width: min(760px, 100%);
+    max-height: min(86vh, 900px); display: flex; flex-direction: column;
+    box-shadow: 0 24px 80px rgba(0,0,0,.35); border: 1px solid var(--border);
+  }
+  .reader-top {
+    display: flex; gap: 10px; align-items: center; padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .reader-top .rsite { color: var(--muted); font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .btn {
+    padding: 7px 13px; border-radius: 8px; border: 1px solid var(--border);
+    font-size: 13px; font-weight: 570; white-space: nowrap;
+  }
+  .btn:hover { background: var(--hover); }
+  .btn.primary { background: var(--series); border-color: var(--series); color: #fff; }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .reader-body { overflow-y: auto; padding: 22px 30px 34px; }
+  .reader-body h1 { font-size: 23px; line-height: 1.25; margin: 0 0 6px; }
+  .reader-body .rmeta { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+  .reader-body p { font-size: 15.5px; line-height: 1.65; margin: 0 0 14px; color: var(--ink); }
+  .reader-body h3 { font-size: 17px; margin: 22px 0 8px; }
+  .spin {
+    width: 26px; height: 26px; border: 3px solid var(--grid); border-top-color: var(--series);
+    border-radius: 50%; animation: spin .8s linear infinite; margin: 60px auto;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .alert {
+    background: var(--surface); border-radius: 14px; width: min(440px, 100%);
+    padding: 22px 24px; border: 1px solid var(--border); box-shadow: 0 24px 80px rgba(0,0,0,.35);
+  }
+  .alert h3 { margin: 0 0 8px; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+  .alert h3 .warn { color: var(--down); font-size: 18px; }
+  .alert p { margin: 0 0 6px; color: var(--ink-2); }
+  .alert .why { font-size: 12.5px; color: var(--muted); }
+  .alert .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
+
+  @media (max-width: 900px) {
+    main { grid-template-columns: 1fr; overflow-y: auto; }
+    .quote-pane { overflow: visible; }
+    .news-pane { border-left: none; border-top: 1px solid var(--border); }
+    .news-list { overflow: visible; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>📈 Stock Ticker</h1>
+    <div class="search">
+      <input id="searchBox" type="text" placeholder="Search ticker or company — e.g. AAPL, Tesla, ^GSPC…"
+             autocomplete="off" spellcheck="false">
+      <div class="suggest" id="suggest"></div>
+    </div>
+    <div class="live stale" id="live"><span class="dot"></span><span id="liveText">connecting…</span></div>
+  </header>
+
+  <main>
+    <section class="quote-pane" id="quotePane">
+      <div class="pane-msg">Loading…</div>
+    </section>
+
+    <aside class="news-pane">
+      <h2 id="newsHead">News</h2>
+      <div class="news-list" id="newsList"><div class="pane-msg">Loading news…</div></div>
+    </aside>
+  </main>
+</div>
+
+<!-- built-in article reader -->
+<div class="overlay" id="readerOverlay">
+  <div class="reader">
+    <div class="reader-top">
+      <span class="rsite" id="readerSite"></span>
+      <button class="btn" id="readerOpenExt">Open in browser ↗</button>
+      <button class="btn" id="readerClose">Close ✕</button>
+    </div>
+    <div class="reader-body" id="readerBody"></div>
+  </div>
+</div>
+
+<!-- fallback prompt when the reader can't load a site -->
+<div class="overlay" id="alertOverlay">
+  <div class="alert">
+    <h3><span class="warn">⚠</span> Can't open in built-in viewer</h3>
+    <p>This site doesn't allow its articles to be read here.</p>
+    <p class="why" id="alertWhy"></p>
+    <p style="margin-top:10px">Open it in your default browser instead?</p>
+    <div class="row">
+      <button class="btn" id="alertCancel">Cancel</button>
+      <button class="btn primary" id="alertOpen">Open in default browser</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const state = {
+  symbol: localStorage.getItem("ticker") || "AAPL",
+  range: "1d",
+  stock: null,
+  pollTimer: null,
+  newsTimer: null,
+  pendingUrl: null,
+};
+const RANGES = [["1d","1D"],["5d","5D"],["1mo","1M"],["6mo","6M"],["1y","1Y"],["5y","5Y"]];
+const CUR = { USD:"$", EUR:"€", GBP:"£", GBp:"p", JPY:"¥", CAD:"C$", AUD:"A$", INR:"₹", CHF:"CHF " };
+
+const money = (v, c) => v == null ? "—" :
+  (CUR[c] ?? (c ? c + " " : "")) + v.toLocaleString("en-US",
+    { minimumFractionDigits: 2, maximumFractionDigits: Math.abs(v) < 1 ? 4 : 2 });
+const big = v => {
+  if (v == null) return "—";
+  const a = Math.abs(v);
+  if (a >= 1e12) return (v/1e12).toFixed(2) + "T";
+  if (a >= 1e9)  return (v/1e9).toFixed(2) + "B";
+  if (a >= 1e6)  return (v/1e6).toFixed(2) + "M";
+  if (a >= 1e3)  return (v/1e3).toFixed(1) + "K";
+  return String(v);
+};
+const ago = ts => {
+  const s = Math.max(0, Date.now()/1000 - ts);
+  if (s < 90) return "just now";
+  if (s < 3600) return Math.round(s/60) + "m ago";
+  if (s < 86400) return Math.round(s/3600) + "h ago";
+  return Math.round(s/86400) + "d ago";
+};
+const api = async (path, params) => {
+  const r = await fetch(path + "?" + new URLSearchParams(params));
+  return r.json();
+};
+
+/* ---------------- quote pane ---------------- */
+async function loadStock(showSpinner) {
+  if (showSpinner) $("quotePane").innerHTML = '<div class="pane-msg">Loading ' + esc(state.symbol) + "…</div>";
+  let d;
+  try { d = await api("/api/stock", { symbol: state.symbol, range: state.range }); }
+  catch { d = { ok: false, reason: "Server not reachable." }; }
+  if (!d.ok) {
+    $("quotePane").innerHTML = '<div class="pane-msg err">' + esc(d.reason || "Failed to load.") + "</div>";
+    setLive(false);
+    return;
+  }
+  state.stock = d;
+  renderQuote(d);
+  setLive(true);
+}
+
+function setLive(ok) {
+  $("live").classList.toggle("stale", !ok);
+  $("liveText").textContent = ok
+    ? "updated " + new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit", second:"2-digit"})
+    : "offline";
+}
+
+function esc(s) { const d = document.createElement("span"); d.textContent = s ?? ""; return d.innerHTML; }
+
+function renderQuote(d) {
+  const change = (d.price != null && d.previousClose != null) ? d.price - d.previousClose : null;
+  const pct = change != null && d.previousClose ? change / d.previousClose * 100 : null;
+  const dir = change == null ? "" : change >= 0 ? "up" : "down";
+  const sign = change != null && change >= 0 ? "+" : "";
+  const asof = d.marketTime ? new Date(d.marketTime * 1000).toLocaleString([], {
+    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+
+  $("quotePane").innerHTML = `
+    <div class="qhead">
+      <div class="name"><b>${esc(d.symbol)}</b>${esc(d.name)}</div>
+      <div class="exch">${esc(d.exchange)}${d.instrument ? " · " + esc(d.instrument) : ""}</div>
+    </div>
+    <div class="price-row">
+      <span class="price">${money(d.price, d.currency)}</span>
+      <span class="delta ${dir}">${change == null ? "" :
+        `${sign}${change.toFixed(2)} (${sign}${pct.toFixed(2)}%)`}</span>
+    </div>
+    <div class="asof">${asof ? "As of " + esc(asof) : ""}${d.timezone ? " · " + esc(d.timezone) : ""} · auto-refreshes every 10s</div>
+    <div class="ranges">${RANGES.map(([k, lbl]) =>
+      `<button data-range="${k}" class="${k === state.range ? "on" : ""}">${lbl}</button>`).join("")}</div>
+    <div class="chart-wrap" id="chartWrap">
+      <svg id="chart" preserveAspectRatio="none"></svg>
+      <div class="tooltip" id="chartTip"><div class="tv"></div><div class="tt"></div></div>
+    </div>
+    <div class="stats">
+      ${stat("Open", money(d.open, d.currency))}
+      ${stat("Previous close", money(d.previousClose, d.currency))}
+      ${stat("Day low", money(d.dayLow, d.currency))}
+      ${stat("Day high", money(d.dayHigh, d.currency))}
+      ${stat("Volume", big(d.volume))}
+      ${stat("52-week low", money(d.week52Low, d.currency))}
+      ${stat("52-week high", money(d.week52High, d.currency))}
+      ${stat("Currency", esc(d.currency))}
+    </div>`;
+  document.querySelectorAll(".ranges button").forEach(b =>
+    b.addEventListener("click", () => { state.range = b.dataset.range; loadStock(false); }));
+  drawChart(d);
+}
+const stat = (k, v) => `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`;
+
+/* ---------------- chart ---------------- */
+function drawChart(d) {
+  const svg = $("chart"), wrap = $("chartWrap"), tip = $("chartTip");
+  const pts = d.candles;
+  if (!pts || pts.length < 2) { svg.outerHTML = '<div class="pane-msg">No chart data for this range.</div>'; return; }
+  const W = wrap.clientWidth || 700, H = 260, padL = 8, padR = 62, padT = 12, padB = 22;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const t0 = pts[0].t, t1 = pts[pts.length - 1].t;
+  let lo = Math.min(...pts.map(p => p.c)), hi = Math.max(...pts.map(p => p.c));
+  if (d.chartPreviousClose != null) { lo = Math.min(lo, d.chartPreviousClose); hi = Math.max(hi, d.chartPreviousClose); }
+  const span = (hi - lo) || hi * 0.01 || 1; lo -= span * 0.06; hi += span * 0.06;
+  const X = t => padL + (t - t0) / (t1 - t0 || 1) * (W - padL - padR);
+  const Y = c => padT + (hi - c) / (hi - lo) * (H - padT - padB);
+
+  const fmtT = t => {
+    const dt = new Date(t * 1000);
+    return state.range === "1d" || state.range === "5d"
+      ? dt.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+      : dt.toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
+  };
+  const fmtAxis = t => {
+    const dt = new Date(t * 1000);
+    if (state.range === "1d") return dt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    if (state.range === "5d" || state.range === "1mo") return dt.toLocaleDateString([], { month: "short", day: "numeric" });
+    return dt.toLocaleDateString([], { month: "short", year: "2-digit" });
+  };
+
+  let g = "";
+  const gridN = 4;
+  for (let i = 0; i <= gridN; i++) {
+    const v = lo + (hi - lo) * i / gridN, y = Y(v);
+    g += `<line x1="${padL}" x2="${W - padR}" y1="${y}" y2="${y}" stroke="var(--grid)" stroke-width="1"/>`;
+    g += `<text x="${W - padR + 8}" y="${y + 4}" fill="var(--muted)" font-size="11"
+          style="font-variant-numeric:tabular-nums">${v.toFixed(hi < 5 ? 3 : 2)}</text>`;
+  }
+  const ticksN = Math.min(5, pts.length);
+  for (let i = 0; i < ticksN; i++) {
+    const p = pts[Math.round(i * (pts.length - 1) / (ticksN - 1))];
+    g += `<text x="${X(p.t)}" y="${H - 6}" fill="var(--muted)" font-size="11"
+          text-anchor="${i === 0 ? "start" : i === ticksN - 1 ? "end" : "middle"}">${fmtAxis(p.t)}</text>`;
+  }
+  if (d.chartPreviousClose != null) {
+    const y = Y(d.chartPreviousClose);
+    g += `<line x1="${padL}" x2="${W - padR}" y1="${y}" y2="${y}" stroke="var(--baseline)"
+          stroke-width="1" stroke-dasharray="4 4"/>`;
+  }
+  const line = pts.map((p, i) => (i ? "L" : "M") + X(p.t).toFixed(1) + " " + Y(p.c).toFixed(1)).join("");
+  const area = line + `L${X(t1).toFixed(1)} ${H - padB}L${X(t0).toFixed(1)} ${H - padB}Z`;
+  svg.innerHTML = g +
+    `<path d="${area}" fill="var(--series-soft)"/>` +
+    `<path d="${line}" fill="none" stroke="var(--series)" stroke-width="2" stroke-linejoin="round"/>` +
+    `<line id="xhair" y1="${padT}" y2="${H - padB}" stroke="var(--baseline)" stroke-width="1" visibility="hidden"/>` +
+    `<circle id="xdot" r="4" fill="var(--series)" stroke="var(--surface)" stroke-width="2" visibility="hidden"/>` +
+    `<rect x="${padL}" y="0" width="${W - padL - padR}" height="${H}" fill="transparent" id="hitbox"/>`;
+
+  const hit = svg.querySelector("#hitbox"), xh = svg.querySelector("#xhair"), xd = svg.querySelector("#xdot");
+  hit.addEventListener("mousemove", ev => {
+    const r = svg.getBoundingClientRect();
+    const mx = (ev.clientX - r.left) * (W / r.width);
+    let best = 0, bd = Infinity;
+    for (let i = 0; i < pts.length; i++) {
+      const dx = Math.abs(X(pts[i].t) - mx);
+      if (dx < bd) { bd = dx; best = i; }
+    }
+    const p = pts[best], px = X(p.t), py = Y(p.c);
+    xh.setAttribute("x1", px); xh.setAttribute("x2", px); xh.setAttribute("visibility", "visible");
+    xd.setAttribute("cx", px); xd.setAttribute("cy", py); xd.setAttribute("visibility", "visible");
+    tip.querySelector(".tv").textContent = money(p.c, d.currency);
+    tip.querySelector(".tt").textContent = fmtT(p.t);
+    tip.style.display = "block";
+    const tw = tip.offsetWidth, left = px / W * r.width;
+    tip.style.left = Math.min(Math.max(4, left - tw / 2), r.width - tw - 4) + "px";
+    tip.style.top = (py / H * r.height - tip.offsetHeight - 12) + "px";
+  });
+  hit.addEventListener("mouseleave", () => {
+    tip.style.display = "none";
+    xh.setAttribute("visibility", "hidden"); xd.setAttribute("visibility", "hidden");
+  });
+}
+
+/* ---------------- news pane ---------------- */
+async function loadNews() {
+  let d;
+  try { d = await api("/api/news", { symbol: state.symbol }); }
+  catch { d = { ok: false }; }
+  $("newsHead").textContent = "News · " + state.symbol.toUpperCase();
+  const list = $("newsList");
+  if (!d.ok || !d.items) { list.innerHTML = '<div class="pane-msg err">Couldn\'t load news.</div>'; return; }
+  if (!d.items.length) { list.innerHTML = '<div class="pane-msg">No recent news found.</div>'; return; }
+  list.innerHTML = "";
+  for (const n of d.items) {
+    const b = document.createElement("button");
+    b.className = "news-item";
+    const img = n.thumbnail
+      ? `<img src="${esc(n.thumbnail)}" alt="" loading="lazy" onerror="this.outerHTML='<div class=noimg>📰</div>'">`
+      : `<div class="noimg">📰</div>`;
+    b.innerHTML = `${img}<div><div class="ntitle">${esc(n.title)}</div>
+      <div class="nmeta">${esc(n.publisher)}${n.time ? " · " + ago(n.time) : ""}</div></div>`;
+    b.addEventListener("click", () => openArticle(n.link, n.publisher));
+    list.appendChild(b);
+  }
+}
+
+/* ---------------- built-in reader ---------------- */
+async function openArticle(url, publisher) {
+  state.pendingUrl = url;
+  $("readerSite").textContent = publisher || url;
+  $("readerBody").innerHTML = '<div class="spin"></div>';
+  $("readerOverlay").classList.add("open");
+  let d;
+  try { d = await api("/api/article", { url }); }
+  catch { d = { ok: false, reason: "Server not reachable." }; }
+  if (!$("readerOverlay").classList.contains("open") || state.pendingUrl !== url) return;
+  if (!d.ok) {
+    $("readerOverlay").classList.remove("open");
+    $("alertWhy").textContent = d.reason || "";
+    $("alertOverlay").classList.add("open");
+    return;
+  }
+  $("readerSite").textContent = (d.site || publisher || "") + " — " + d.url;
+  const body = $("readerBody");
+  body.innerHTML = "";
+  const h1 = document.createElement("h1"); h1.textContent = d.title; body.appendChild(h1);
+  const meta = document.createElement("div"); meta.className = "rmeta";
+  meta.textContent = [d.site || publisher, "built-in reader view"].filter(Boolean).join(" · ");
+  body.appendChild(meta);
+  for (const blk of d.blocks) {
+    if (blk.tag === "h" && blk.text === d.title) continue;
+    const el = document.createElement(blk.tag === "h" ? "h3" : "p");
+    el.textContent = blk.text;
+    body.appendChild(el);
+  }
+  body.scrollTop = 0;
+}
+
+const openExternal = url => api("/api/open", { url });
+
+$("readerClose").addEventListener("click", () => $("readerOverlay").classList.remove("open"));
+$("readerOpenExt").addEventListener("click", () => { if (state.pendingUrl) openExternal(state.pendingUrl); });
+$("alertCancel").addEventListener("click", () => $("alertOverlay").classList.remove("open"));
+$("alertOpen").addEventListener("click", () => {
+  if (state.pendingUrl) openExternal(state.pendingUrl);
+  $("alertOverlay").classList.remove("open");
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") { $("readerOverlay").classList.remove("open"); $("alertOverlay").classList.remove("open"); }
+});
+$("readerOverlay").addEventListener("click", e => { if (e.target === e.currentTarget) e.currentTarget.classList.remove("open"); });
+$("alertOverlay").addEventListener("click", e => { if (e.target === e.currentTarget) e.currentTarget.classList.remove("open"); });
+
+/* ---------------- search & autocomplete ---------------- */
+const box = $("searchBox"), sug = $("suggest");
+let debounce = null, activeIdx = -1;
+
+function setSymbol(sym) {
+  state.symbol = sym.toUpperCase();
+  localStorage.setItem("ticker", state.symbol);
+  box.value = "";
+  sug.classList.remove("open");
+  loadStock(true);
+  loadNews();
+}
+
+box.addEventListener("input", () => {
+  clearTimeout(debounce);
+  const q = box.value.trim();
+  activeIdx = -1;
+  if (!q) { sug.classList.remove("open"); return; }
+  debounce = setTimeout(async () => {
+    let d;
+    try { d = await api("/api/search", { q }); } catch { return; }
+    if (box.value.trim() !== q) return;
+    sug.innerHTML = "";
+    for (const it of d.items || []) {
+      const b = document.createElement("button");
+      b.innerHTML = `<span class="sym">${esc(it.symbol)}</span><span class="nm">${esc(it.name)}</span>
+                     <span class="ex">${esc([it.exchange, it.type].filter(Boolean).join(" · "))}</span>`;
+      b.addEventListener("click", () => setSymbol(it.symbol));
+      sug.appendChild(b);
+    }
+    sug.classList.toggle("open", (d.items || []).length > 0);
+  }, 250);
+});
+box.addEventListener("keydown", e => {
+  const opts = [...sug.querySelectorAll("button")];
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    if (!opts.length) return;
+    activeIdx = (activeIdx + (e.key === "ArrowDown" ? 1 : -1) + opts.length) % opts.length;
+    opts.forEach((o, i) => o.classList.toggle("active", i === activeIdx));
+  } else if (e.key === "Enter") {
+    if (activeIdx >= 0 && opts[activeIdx]) opts[activeIdx].click();
+    else if (box.value.trim()) setSymbol(box.value.trim());
+  } else if (e.key === "Escape") {
+    sug.classList.remove("open");
+  }
+});
+document.addEventListener("click", e => { if (!e.target.closest(".search")) sug.classList.remove("open"); });
+
+/* ---------------- boot & polling ---------------- */
+function startPolling() {
+  clearInterval(state.pollTimer); clearInterval(state.newsTimer);
+  state.pollTimer = setInterval(() => { if (!document.hidden) loadStock(false); }, 10000);
+  state.newsTimer = setInterval(() => { if (!document.hidden) loadNews(); }, 90000);
+}
+window.addEventListener("resize", () => { if (state.stock) drawChart(state.stock); });
+loadStock(true);
+loadNews();
+startPolling();
+</script>
+</body>
+</html>
